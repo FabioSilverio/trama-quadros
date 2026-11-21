@@ -1,3 +1,4 @@
+import { pagePreview } from "../server/page-preview.js";
 import { parseLink } from "../src/links.js";
 function plain(html) {
   return String(html || "")
@@ -61,6 +62,13 @@ export default async function handler(req, res) {
     } catch {
       /* The original link is always usable. */
     }
+  if (!endpoint && ["web", "substack"].includes(ref.kind)) {
+    try {
+      Object.assign(info, await pagePreview(ref.url));
+    } catch {
+      /* Keep the basic card when the site is unavailable. */
+    }
+  }
   res.setHeader(
     "Cache-Control",
     "public, s-maxage=21600, stale-while-revalidate=86400",

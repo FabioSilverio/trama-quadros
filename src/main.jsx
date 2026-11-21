@@ -26,14 +26,15 @@ import {
 } from "lucide-react";
 import "@fontsource-variable/dm-sans/wght.css";
 import "./style.css";
+import "./dark.css";
+import { useAppearance, ThemePicker } from "./theme.jsx";
 import {
   initialize,
   list,
   put,
   patchBoard,
   deleteBoard,
-  getScene,
-  saveScene,
+  copyBoard,
   palette,
 } from "./storage.js";
 import { Art, coverColors } from "./art.jsx";
@@ -41,10 +42,10 @@ import { Dialog, Brand } from "./ui.jsx";
 import { parseLink } from "./links.js";
 const Editor = lazy(() => import("./Editor.jsx"));
 const boardHash = () =>
-  location.hash.startsWith("#quadro/")
-    ? decodeURIComponent(location.hash.slice(8))
-    : "";
+  /^#quadro\/([a-zA-Z0-9_-]+)$/.exec(location.hash)?.[1] || "";
 function App() {
+  const appearance = useAppearance();
+  const submitting = useRef(false);
   const [projects, setProjects] = useState([]),
     [boards, setBoards] = useState([]),
     [ready, setReady] = useState(false),
@@ -53,11 +54,13 @@ function App() {
     [filter, filterBy] = useState("all"),
     [query, search] = useState(""),
     [grid, setGrid] = useState(true),
+    [limit, setLimit] = useState(24),
     [sort, setSort] = useState("recent"),
     [modal, dialog] = useState(null),
     [mobile, drawer] = useState(false),
     [menu, actions] = useState("");
   const find = useRef(null);
+  useEffect(() => setLimit(24), [filter, query, sort]);
   async function refresh() {
     const [p, b] = await list();
     setProjects(p);
@@ -132,6 +135,12 @@ function App() {
       });
       return;
     }
+    if (["project", "rename"].includes(m.type) && !name) {
+      dialog({ ...m, error: "Digite um nome para continuar." });
+      return;
+    }
+    if (submitting.current) return;
+    submitting.current = true;
     try {
       if (m.type === "project") {
         const id = crypto.randomUUID();
@@ -166,25 +175,30 @@ function App() {
       await refresh();
       dialog(null);
       go(id);
-    } catch {
+    } catch (err) {
       dialog({
         ...m,
-        error: "Falha ao salvar. Confira o espaço disponível no navegador.",
+        error:
+          m.type === "delete" && err.name === "Error"
+            ? err.message
+            : "Falha ao salvar. Confira o espaço disponível no navegador.",
       });
+    } finally {
+      submitting.current = false;
     }
   }
   async function duplicate(b) {
-    const id = crypto.randomUUID();
-    await put("boards", {
-      ...b,
-      id,
-      name: b.name + " (cópia)",
-      updated: Date.now(),
-    });
-    const scene = await getScene(b.id);
-    if (scene) await saveScene(id, scene);
-    await refresh();
-    actions("");
+    try {
+      await copyBoard(b.id);
+      await refresh();
+      actions("");
+    } catch {
+      dialog({
+        type: "message",
+        message:
+          "Não foi possível duplicar o quadro. Confira o armazenamento do navegador.",
+      });
+    }
   }
   const filtered = boards
     .filter(
@@ -227,6 +241,7 @@ function App() {
         <Editor
           key={selected.id}
           board={selected}
+          appearance={appearance}
           project={projects.find((p) => p.id === selected.project)}
           leave={() => {
             location.hash = "";
@@ -322,13 +337,14 @@ function App() {
             <Menu />
           </button>
           <span className="crumb">
-            <PanelLeft size={16} /> Workspace
+            <PanelLeft size={16} /> Trama
           </span>
           <ChevronRight size={14} />
           <b>
             {activeProject?.name ||
               (filter === "fav" ? "Favoritos" : "Visão geral")}
           </b>
+          <ThemePicker appearance={appearance} />
           <button
             className="icon help"
             title="Como usar"
@@ -365,7 +381,10 @@ function App() {
             <div className="hero-copy">
               <div className="eyebrow">
                 <span className="statusdot" />{" "}
-                {activeProject ? "PROJETO" : projects.length + " PROJETOS"}
+                {activeProject
+                  ? "PROJETO"
+                  : projects.length.toLocaleString("pt-BR") +
+                    (projects.length === 1 ? " PROJETO" : " PROJETOS")}
               </div>
               <h1>
                 {activeProject?.name ||
@@ -457,7 +476,7 @@ function App() {
               </div>
             </div>
             <div className={"cards " + (grid ? "" : "list")}>
-              {filtered.map((b) => {
+              {filtered.slice(0, limit).map((b) => {
                 const p = projects.find((p) => p.id === b.project);
                 return (
                   <article className="card" key={b.id}>
@@ -474,7 +493,7 @@ function App() {
                         }}
                       >
                         {b.preview ? (
-                          <img src={b.preview} alt="" />
+                          <img loading="lazy" src={b.preview} alt="" />
                         ) : b.cover ? (
                           <Art type={b.cover} />
                         ) : (
@@ -503,8 +522,15 @@ function App() {
                         (b.favorite ? "Desfavoritar " : "Favoritar ") + b.name
                       }
                       onClick={async () => {
-                        await patchBoard(b.id, { favorite: !b.favorite });
-                        await refresh();
+                        try {
+                          await patchBoard(b.id, { favorite: !b.favorite });
+                          await refresh();
+                        } catch {
+                          dialog({
+                            type: "message",
+                            message: "Não foi possível salvar o favorito.",
+                          });
+                        }
                       }}
                     >
                       <Star
@@ -548,6 +574,14 @@ function App() {
                 );
               })}
             </div>
+            {filtered.length > limit && (
+              <button
+                className="secondary load-more"
+                onClick={() => setLimit((n) => n + 24)}
+              >
+                Carregar mais quadros
+              </button>
+            )}
             {!filtered.length && (
               <div className="empty">
                 <LayoutGrid />
@@ -584,6 +618,7 @@ function App() {
         <Dialog
           title={
             {
+              message: "Área de trabalho",
               project: "Novo projeto",
               board: modal.requireLink
                 ? "Criar quadro com link"
@@ -595,7 +630,9 @@ function App() {
           }
           close={() => dialog(null)}
         >
-          {modal.type === "help" ? (
+          {modal.type === "message" ? (
+            <p role="alert">{modal.message}</p>
+          ) : modal.type === "help" ? (
             <div className="guide">
               <p>
                 Crie um projeto no menu lateral e abra um quadro. Cole ou solte
@@ -716,4 +753,36 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<App />);
+class WorkspaceBoundary extends React.Component {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed)
+      return (
+        <main className="loading" role="alert">
+          <Brand />
+          <p>Não foi possível carregar esta parte da Trama.</p>
+          <button className="primary" onClick={() => location.reload()}>
+            Recarregar aplicativo
+          </button>
+          <button
+            className="secondary"
+            onClick={() => {
+              history.replaceState(null, "", location.pathname);
+              location.reload();
+            }}
+          >
+            Voltar à área de trabalho
+          </button>
+        </main>
+      );
+    return this.props.children;
+  }
+}
+createRoot(document.getElementById("root")).render(
+  <WorkspaceBoundary>
+    <App />
+  </WorkspaceBoundary>,
+);

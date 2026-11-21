@@ -7,6 +7,7 @@ import {
   newElementWith,
   CaptureUpdateAction,
   exportToBlob,
+  serializeAsJSON,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import {
@@ -21,18 +22,14 @@ import {
   MessageSquareText,
   X,
 } from "lucide-react";
-import {
-  getScene,
-  saveScene,
-  patchBoard,
-  getSetting,
-  setSetting,
-} from "./storage.js";
+import { getScene, saveScene, getSetting, setSetting } from "./storage.js";
 import { sceneSpecs } from "./art.jsx";
 import { Dialog } from "./ui.jsx";
+import { ThemePicker } from "./theme.jsx";
 import { parseLink } from "./links.js";
 import { linkCard, lettering, textDefaults, readData } from "./media.js";
 import "./editor.css";
+import { journalScene, recoverJournal, forgetJournal } from "./recovery.js";
 
 const immediate = CaptureUpdateAction.IMMEDIATELY;
 const defaults = { smoothing: 0 };
@@ -59,7 +56,7 @@ const sceneState = (a) =>
       .filter((k) => a[k] !== undefined)
       .map((k) => [k, a[k]]),
   );
-export default function Editor({ board, project, leave }) {
+export default function Editor({ board, project, leave, appearance }) {
   const [initial, init] = useState(null),
     [api, setApi] = useState(null),
     [problem, fail] = useState(""),
@@ -75,6 +72,11 @@ export default function Editor({ board, project, leave }) {
     apiRef = useRef(null),
     latest = useRef(null),
     written = useRef(null),
+    revision = useRef(0),
+    writer = useRef(null),
+    sequence = useRef(0),
+    lastError = useRef(null),
+    savingExit = useRef(false),
     timer = useRef(),
     queue = useRef(Promise.resolve()),
     started = useRef(false),
@@ -88,18 +90,29 @@ export default function Editor({ board, project, leave }) {
   }
   function save(cover) {
     clearTimeout(timer.current);
+    timer.current = null;
     const snap = latest.current;
     if (!snap || (cover === undefined && snap === written.current))
       return queue.current;
     const op = queue.current
       .catch(() => {})
-      .then(() => saveScene(board.id, snap, cover))
-      .then(() => {
+      .then(() => saveScene(board.id, snap, cover, revision.current))
+      .then((savedRevision) => {
+        revision.current = savedRevision;
+        lastError.current = null;
         written.current = snap;
         if (alive.current && latest.current === snap) setStatus("Salvo");
       })
       .catch((err) => {
-        if (alive.current) setStatus("Erro ao salvar");
+        lastError.current = err;
+        if (alive.current) {
+          setStatus("Erro ao salvar");
+          notify(
+            err.name === "QuotaExceededError"
+              ? "Armazenamento cheio. Exporte uma cópia pelo menu do editor."
+              : err.message || "Falha ao salvar o quadro.",
+          );
+        }
         throw err;
       });
     queue.current = op;
@@ -110,12 +123,34 @@ export default function Editor({ board, project, leave }) {
     let release;
     const held = new Promise((r) => (release = r));
     async function load() {
-      const [scene, settings, library] = await Promise.all([
+      const [committed, settings, library] = await Promise.all([
         getScene(board.id),
         getSetting("pen"),
         getSetting("library"),
       ]);
       if (!alive.current) return;
+      const recovered = recoverJournal(board.id, committed);
+      let scene = committed;
+      revision.current = committed?.revision || 0;
+      written.current = committed;
+      if (recovered) {
+        scene = recovered;
+        try {
+          revision.current = await saveScene(
+            board.id,
+            recovered,
+            undefined,
+            revision.current,
+          );
+          written.current = recovered;
+          forgetJournal(board.id);
+        } catch (err) {
+          lastError.current = err;
+          setStatus("Erro ao salvar");
+        }
+      } else {
+        forgetJournal(board.id);
+      }
       preferences({ ...defaults, ...settings });
       init(
         scene
@@ -150,7 +185,32 @@ export default function Editor({ board, project, leave }) {
     const hide = () => {
       if (document.visibilityState === "hidden") save().catch(() => {});
     };
-    const unload = () => save().catch(() => {});
+    const journal = () => {
+      const activeApi = apiRef.current;
+      if (activeApi && base.current && !activeApi.getAppState().isLoading)
+        snapshot(
+          activeApi.getSceneElements(),
+          activeApi.getAppState(),
+          activeApi.getFiles(),
+        );
+      return journalScene(
+        board.id,
+        latest.current,
+        written.current,
+        revision.current,
+      );
+    };
+    const unload = () => {
+      journal();
+      save().catch(() => {});
+    };
+    const protect = (event) => {
+      if (!journal() || lastError.current) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", protect);
     document.addEventListener("visibilitychange", hide);
     window.addEventListener("pagehide", unload);
     return () => {
@@ -160,6 +220,7 @@ export default function Editor({ board, project, leave }) {
       release();
       document.removeEventListener("visibilitychange", hide);
       window.removeEventListener("pagehide", unload);
+      window.removeEventListener("beforeunload", protect);
     };
   }, [board.id]);
   useEffect(() => {
@@ -178,7 +239,7 @@ export default function Editor({ board, project, leave }) {
         await save().catch(() => {});
         if (written.current !== latest.current) return;
       }
-      await patchBoard(board.id, { initialLink: null });
+      // The first durable scene containing this reference clears the queued URL atomically.
     }, 150);
     return () => clearTimeout(task);
   }, [api, initial]);
@@ -212,7 +273,7 @@ export default function Editor({ board, project, leave }) {
       {
         id: fileId,
         dataURL: data.dataURL,
-        mimeType: "image/png",
+        mimeType: data.mimeType || "image/png",
         created: now,
         lastRetrieved: now,
       },
@@ -220,19 +281,17 @@ export default function Editor({ board, project, leave }) {
     const old = oldId && api.getSceneElements().find((e) => e.id === oldId);
     if (old) {
       api.updateScene({
-        elements: api
-          .getSceneElements()
-          .map((e) =>
-            e === old
-              ? newElementWith(e, {
-                  fileId,
-                  width: data.width,
-                  height: data.height,
-                  customData: data.customData,
-                  status: "saved",
-                })
-              : e,
-          ),
+        elements: api.getSceneElements().map((e) =>
+          e === old
+            ? newElementWith(e, {
+                fileId,
+                width: data.width,
+                height: data.height,
+                customData: data.customData,
+                status: "saved",
+              })
+            : e,
+        ),
         captureUpdate: immediate,
       });
       return;
@@ -279,7 +338,10 @@ export default function Editor({ board, project, leave }) {
   function snapshot(elements, state, files) {
     const active = elements.filter((e) => !e.isDeleted),
       used = new Set(active.map((e) => e.fileId).filter(Boolean));
+    writer.current ||= crypto.randomUUID();
     latest.current = {
+      writer: writer.current,
+      sequence: ++sequence.current,
       elements: active,
       appState: sceneState(state),
       files: Object.fromEntries(
@@ -288,6 +350,7 @@ export default function Editor({ board, project, leave }) {
     };
   }
   function onChange(elements, state, files) {
+    if (state.isLoading || !alive.current) return;
     const only = Object.keys(state.selectedElementIds);
     const chosen =
       only.length === 1
@@ -318,8 +381,8 @@ export default function Editor({ board, project, leave }) {
     snapshot(elements, state, files);
     if (!previous) return;
     setStatus("Salvando…");
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => save().catch(() => {}), 300);
+    if (!timer.current)
+      timer.current = setTimeout(() => save().catch(() => {}), 250);
   }
   function openLive(el) {
     const ref = parseLink(el.customData.reference.url);
@@ -399,14 +462,19 @@ export default function Editor({ board, project, leave }) {
     });
   }
   async function exit() {
-    if (!api || pending.current) return;
+    if (!api) {
+      leave();
+      return;
+    }
+    if (pending.current || savingExit.current) return;
+    savingExit.current = true;
     try {
       const elements = api.getSceneElements();
       snapshot(elements, api.getAppState(), api.getFiles());
       let cover;
       if (elements.length) {
         try {
-          const blob = await exportToBlob({
+          const render = exportToBlob({
             elements,
             files: api.getFiles(),
             appState: {
@@ -417,12 +485,19 @@ export default function Editor({ board, project, leave }) {
             maxWidthOrHeight: 620,
             mimeType: "image/png",
           });
-          cover = await readData(blob);
+          // Keep leaving a large board responsive if thumbnail rendering stalls.
+          cover = await Promise.race([
+            render.then(readData),
+            new Promise((resolve) =>
+              setTimeout(() => resolve(undefined), 1200),
+            ),
+          ]);
         } catch {}
       } else cover = null;
       await save(cover);
       leave();
     } catch {
+      savingExit.current = false;
       notify(
         "O quadro ainda não foi salvo. Exporte uma cópia pelo menu do editor.",
       );
@@ -459,6 +534,7 @@ export default function Editor({ board, project, leave }) {
         return;
       }
       if (m.type === "caption") {
+        if (!m.text.trim()) throw Error("Digite a legenda antes de inserir.");
         const el = api.getSceneElements().find((el) => el.id === m.id);
         if (el)
           append([
@@ -478,6 +554,30 @@ export default function Editor({ board, project, leave }) {
       dialog(null);
     } catch (err) {
       dialog({ ...m, error: err.message });
+    }
+  }
+  function exportFile() {
+    try {
+      const json = serializeAsJSON(
+        api.getSceneElements(),
+        api.getAppState(),
+        api.getFiles(),
+        "local",
+      );
+      const url = URL.createObjectURL(
+        new Blob([json], { type: "application/json" }),
+      );
+      const anchor = document.createElement("a");
+      anchor.download =
+        (board.name.replace(/[<>:"/\\|?*]/g, "-").slice(0, 90) || "Quadro") +
+        ".excalidraw";
+      anchor.href = url;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      notify("Falha ao gerar o arquivo. Tente novamente pelo menu do editor.");
     }
   }
   function textDialog(el) {
@@ -516,13 +616,22 @@ export default function Editor({ board, project, leave }) {
             <Folder size={12} />
             {project?.name}
           </small>
-          <b>{board.name}</b>
+          <b title={board.name}>{board.name}</b>
         </div>
         <span className="save-status" role="status">
           <Check size={14} />
           {busy ? "Carregando referência…" : status}
         </span>
+        {status === "Erro ao salvar" && (
+          <button
+            className="secondary retry-save"
+            onClick={() => save().catch(() => {})}
+          >
+            Tentar salvar
+          </button>
+        )}
         <div className="editor-buttons">
+          <ThemePicker appearance={appearance} />
           <button
             className="secondary"
             aria-label="Ajustes"
@@ -570,6 +679,7 @@ export default function Editor({ board, project, leave }) {
           <Excalidraw
             excalidrawAPI={setApi}
             initialData={initial}
+            theme={appearance.theme}
             langCode="pt-BR"
             name={board.name}
             onChange={onChange}
@@ -624,7 +734,11 @@ export default function Editor({ board, project, leave }) {
           </div>
         )}
         {live && liveRect && (
-          <section className="live-card" style={liveRect}>
+          <section
+            className="live-card"
+            style={liveRect}
+            aria-label="Referência interativa"
+          >
             <header>
               <b>{live.source}</b>
               <a
@@ -646,7 +760,11 @@ export default function Editor({ board, project, leave }) {
             {live.frame ? (
               <iframe
                 title={live.title}
-                src={live.frame}
+                src={
+                  live.kind === "x"
+                    ? live.frame + "&theme=" + appearance.theme
+                    : live.frame
+                }
                 allow="fullscreen; encrypted-media; picture-in-picture"
                 allowFullScreen
                 referrerPolicy="strict-origin-when-cross-origin"
@@ -709,6 +827,9 @@ export default function Editor({ board, project, leave }) {
               <button className="secondary" onClick={() => textDialog()}>
                 <Type size={16} />
                 Inserir texto com outra fonte
+              </button>
+              <button className="secondary" onClick={exportFile}>
+                Baixar cópia .excalidraw
               </button>
             </div>
           ) : (

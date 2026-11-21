@@ -1,0 +1,200 @@
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  position: relative;
+  min-height: 34px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.theme-picker:focus-within {
+  outline: 2px solid #997ce2;
+  outline-offset: 2px;
+}
+.theme-picker select {
+  background: transparent;
+  color: inherit;
+  border: 0;
+  font-size: 13px;
+  min-height: 32px;
+}
+.topbar > .theme-picker {
+  margin-left: auto;
+}
+.topbar .help {
+  margin-left: 0;
+}
+:root[data-theme="dark"] {
+  --panel: #25232c;
+  --line: #413d4a;
+  --muted: #bab4c6;
+  --violet: #6951ca;
+  background: #19181e;
+  color: #f1eef7;
+}
+[data-theme="dark"] .workspace,
+[data-theme="dark"] .editor-page {
+  background: #19181e;
+}
+[data-theme="dark"] :is(.topbar, .sidebar, .editor-top) {
+  background: #201e26;
+  border-color: var(--line);
+}
+[data-theme="dark"] :is(.topbar b, .loading .brand, .side-foot b) {
+  color: #eeeaf4;
+}
+[data-theme="dark"]
+  :is(
+    .crumb,
+    .nav,
+    .side-label,
+    .card-info small,
+    .save-status,
+    .editor-name small,
+    .icon,
+    .date,
+    .dialog .guide,
+    .sort select,
+    .theme-picker,
+    .text-options label
+  ) {
+  color: #c3bdcc;
+}
+[data-theme="dark"] :is(.hero) {
+  background-color: #332b45;
+  background-image: radial-gradient(#594a73 1px, transparent 1px);
+  border-color: #51435f;
+}
+[data-theme="dark"] .hero:before {
+  background: linear-gradient(90deg, #342c46 26%, #342c46ef 65%, transparent);
+}
+[data-theme="dark"] .hero-art {
+  filter: brightness(0.86) saturate(0.88);
+}
+[data-theme="dark"] :is(.eyebrow, .text-btn, .reader a) {
+  color: #d4b6ff;
+}
+[data-theme="dark"] :is(.hero p, .tip p) {
+  color: #c9c0d6;
+}
+[data-theme="dark"]
+  :is(
+    .nav:hover,
+    .context button:hover,
+    .icon:hover,
+    .reference-tools button:hover,
+    .live-card header button:hover
+  ) {
+  background: #36313e;
+}
+[data-theme="dark"]
+  :is(
+    .nav.active,
+    .view .current,
+    .profile,
+    .tip-icon,
+    .count,
+    .nav span,
+    .text-options button[aria-pressed="true"]
+  ) {
+  background: #40334f;
+  color: #d8c5ff;
+}
+[data-theme="dark"]
+  :is(
+    .card,
+    .dialog,
+    .context,
+    .secondary,
+    .search,
+    .sort,
+    .view,
+    .reference-tools,
+    .live-card,
+    .text-options button
+  ) {
+  background: #27242f;
+  border-color: var(--line);
+  color: #f0edf5;
+}
+[data-theme="dark"] .card:has(.open-card:hover) {
+  border-color: #8f7aa8;
+}
+[data-theme="dark"] .cover {
+  filter: brightness(0.83) saturate(0.85);
+}
+[data-theme="dark"]
+  :is(
+    .search input,
+    .sort select,
+    .theme-picker select,
+    .dialog input,
+    .dialog textarea,
+    .dialog select
+  ) {
+  color: #f1edf6;
+}
+[data-theme="dark"] select option {
+  background: #2b2732;
+  color: #f1edf6;
+}
+[data-theme="dark"] :is(.search kbd, .text-options button) {
+  border-color: #595261;
+  color: #c9c1d4;
+}
+[data-theme="dark"] :is(.tip, .live-card header) {
+  background: #24212c;
+  border-color: #51485e;
+}
+[data-theme="dark"]
+  :is(.reference-tools button, .live-card header a, .live-card header button) {
+  color: #decdfa;
+}
+[data-theme="dark"] .dialog input:not([type="color"]):not([type="range"]),
+[data-theme="dark"] .dialog select,
+[data-theme="dark"] .dialog textarea {
+  background: #201d26;
+  color: #f2eff9;
+  border-color: #544c5e;
+}
+[data-theme="dark"] .dialog [role="alert"] {
+  color: #ffadae;
+}
+[data-theme="dark"] .dialog::backdrop {
+  background: #07060cb3;
+}
+[data-theme="dark"] .search input::placeholder,
+[data-theme="dark"] .dialog input::placeholder {
+  color: #ada5b9;
+}
+[data-theme="dark"] .editor-page .drawing .excalidraw.theme--dark {
+  --color-primary: #c4aaff;
+  --color-primary-light: #43375b;
+}
+@media (max-width: 640px) {
+  .editor-top .theme-picker {
+    padding: 0;
+    width: 34px;
+    justify-content: center;
+  }
+  .editor-top .theme-picker select {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+  }
+  .topbar > .theme-picker {
+    flex-shrink: 0;
+  }
+  .topbar > b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar {
+    min-width: 0;
+  }
+}

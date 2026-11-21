@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useId } from "react";
 import { X } from "lucide-react";
 export function Dialog({ title, close, children }) {
   const ref = useRef(null);
+  const heading = useId();
   useEffect(() => {
     const d = ref.current;
     d.showModal();
@@ -10,6 +11,7 @@ export function Dialog({ title, close, children }) {
   return (
     <dialog
       ref={ref}
+      aria-labelledby={heading}
       className="dialog"
       onCancel={(e) => {
         e.preventDefault();
@@ -29,7 +31,7 @@ export function Dialog({ title, close, children }) {
       }}
     >
       <header>
-        <h2>{title}</h2>
+        <h2 id={heading}>{title}</h2>
         <button aria-label="Fechar" className="icon" onClick={close}>
           <X size={19} />
         </button>

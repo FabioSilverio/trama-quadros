@@ -85,7 +85,7 @@ p {
   justify-content: space-between;
   padding: 0 12px;
   margin: 0 0 9px;
-  color: #787681;
+  color: #6c6976;
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.065em;
@@ -117,6 +117,10 @@ p {
   background: #eae5f9;
   color: #634ab9;
   font-weight: 660;
+}
+.nav:has(span) {
+  gap: 7px;
+  padding-right: 9px;
 }
 .nav span {
   margin-left: auto;
@@ -476,7 +480,7 @@ p {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #807b88;
+  color: #706a78;
   font-size: 12px;
 }
 .star {
@@ -572,7 +576,7 @@ p {
 }
 .tip p {
   font-size: 13px;
-  color: #77707f;
+  color: #6e6777;
   margin-top: 3px;
 }
 .text-btn {
@@ -582,6 +586,27 @@ p {
   font-size: 13px;
   font-weight: 620;
   white-space: nowrap;
+}
+.load-more {
+  display: flex;
+  margin: 18px auto 0;
+}
+.card-info small {
+  overflow-wrap: anywhere;
+}
+.card-info small i {
+  flex-shrink: 0;
+}
+.reader {
+  overflow-wrap: anywhere;
+}
+.editor-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  font-variant-numeric: tabular-nums;
 }
 .empty,
 .loading {
@@ -723,11 +748,13 @@ p {
   .sidebar {
     position: fixed;
     transform: translateX(-100%);
+    visibility: hidden;
     transition: transform 0.18s ease;
     z-index: 11;
     width: 235px;
   }
   .sidebar.visible {
+    visibility: visible;
     transform: translateX(0);
   }
   .hamburger {

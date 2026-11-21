@@ -163,7 +163,9 @@ export const textDefaults = {
   italic: false,
 };
 async function fontName(spec) {
-  if (!spec.fontData) return spec.family;
+  if (!spec.fontData) return spec.family || "Georgia";
+  if (!/^data:[^,]*;base64,[A-Za-z0-9+/=]+$/.test(spec.fontData))
+    throw Error("Arquivo de fonte inválido.");
   const name = "Trama-" + spec.fontId;
   if (
     !document.fonts.check('16px "' + name + '"') ||
@@ -176,6 +178,10 @@ async function fontName(spec) {
   return name;
 }
 export async function lettering(spec) {
+  if (typeof spec.text !== "string" || !spec.text.trim())
+    throw Error("Digite o texto antes de inserir.");
+  if (!Number.isFinite(spec.size) || spec.size < 8 || spec.size > 240)
+    throw Error("Use um tamanho entre 8 e 240.");
   const family = await fontName(spec),
     font =
       (spec.italic ? "italic " : "") +
@@ -205,7 +211,13 @@ export async function lettering(spec) {
   return {
     width,
     height,
-    dataURL: canvas.toDataURL("image/png"),
+    // Excalidraw adapts SVG ink to the canvas theme. The embedded bitmap keeps custom fonts portable.
+    dataURL:
+      "data:image/svg+xml;base64," +
+      btoa(
+        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}"><image width="${width}" height="${height}" xlink:href="${canvas.toDataURL("image/png")}"/></svg>`,
+      ),
+    mimeType: "image/svg+xml",
     customData: { lettering: spec },
   };
 }
