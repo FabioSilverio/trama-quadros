@@ -75,8 +75,17 @@ export default async function handler(req, res) {
     "Cache-Control",
     "public, s-maxage=21600, stale-while-revalidate=86400",
   );
-  const rich=await extra;
-  if(rich)for(const k of ["title","author","image"])if(rich[k])info[k]=rich[k];
+  const rich = await extra;
+  if (rich)
+    for (const k of [
+      "title",
+      "author",
+      "handle",
+      "avatar",
+      "publishedAt",
+      "image",
+    ])
+      if (rich[k]) info[k] = rich[k];
   res.status(200).json({
     ...(rich?.media?.length?{media:rich.media}:{}),
     ...Object.fromEntries(

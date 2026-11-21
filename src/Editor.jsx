@@ -20,6 +20,7 @@ import {
   Type,
   Folder,
   MessageSquareText,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
@@ -349,14 +350,21 @@ export default function Editor({
     ]);
     const old = oldId && api.getSceneElements().find((e) => e.id === oldId);
     if (old) {
+      const nextWidth = old.customData?.reference ? old.width : data.width;
+      const nextHeight = old.customData?.reference
+        ? Math.round((old.width * data.height) / data.width)
+        : data.height;
       api.updateScene({
         elements: api.getSceneElements().map((e) =>
           e === old
             ? newElementWith(e, {
                 fileId,
-                width: data.width,
-                height: data.height,
-                customData: data.customData,
+                width: nextWidth,
+                height: nextHeight,
+                customData: {
+                  ...e.customData,
+                  ...data.customData,
+                },
                 status: "saved",
               })
             : e,
@@ -385,6 +393,22 @@ export default function Editor({
         link: data.link || null,
       },
     ]);
+  }
+  async function refreshReference(el) {
+    const ref = el?.customData?.reference;
+    if (!ref?.url) return;
+    pending.current++;
+    setBusy(pending.current);
+    try {
+      const data = await linkCard(ref.url, ref.title || "");
+      if (!alive.current) return;
+      insertImage(data, center(), el.id);
+    } catch (e) {
+      if (alive.current) notify(e.message || "Falha ao atualizar o cartão.");
+    } finally {
+      pending.current--;
+      if (alive.current) setBusy(pending.current);
+    }
   }
   async function addReference(raw, pos, isInitial = false) {
     const at = pos || center();
@@ -811,6 +835,13 @@ export default function Editor({
                 >
                   <MessageSquareText size={15} />
                   Legenda
+                </button>
+                <button
+                  disabled={busy > 0}
+                  onClick={() => refreshReference(selected)}
+                >
+                  <RefreshCw size={15} />
+                  Atualizar cartão
                 </button>
               </>
             ) : (
