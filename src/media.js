@@ -49,19 +49,27 @@ function surface(w, h) {
   c.scale(2, 2);
   return { canvas, c };
 }
-export async function linkCard(raw) {
+export async function getReference(raw,oldTitle="") {
   const ref = parseLink(raw);
   if (!ref) throw Error("Cole um link http ou https válido.");
+  if(ref.kind==="media")return ref;
+  const query=new URLSearchParams({url:ref.url});
+  if(ref.kind==="x"){query.set("v","2");const linked=oldTitle.match(/https:\/\/t\.co\/[a-z0-9]+/i)?.[0];if(linked)query.set("linked",linked)}
   try {
-    const r = await fetch("/api/preview?url=" + encodeURIComponent(ref.url), {
+    const r = await fetch("/api/preview?" + query, {
       signal: AbortSignal.timeout(5300),
     });
     if (r.ok) {
       const data = await r.json();
+      if(Array.isArray(data.media)&&ref.kind==="x")ref.media=data.media;
       for (const k of ["title", "author", "description", "image"])
         if (typeof data[k] === "string" && data[k]) ref[k] = data[k];
     }
   } catch {}
+  return ref;
+}
+export async function linkCard(raw) {
+  const ref=await getReference(raw);
   const image = await coverImage(ref.image),
     width = 410;
   const { c: measure } = surface(10, 10);
@@ -83,9 +91,17 @@ export async function linkCard(raw) {
       46;
   const { canvas, c } = surface(width, height);
   const accent =
-    { youtube: "#c93a40", substack: "#cf6735", x: "#393943", vimeo: "#297e9f" }[
-      ref.kind
-    ] || "#7354b1";
+    {
+      youtube: "#c93a40",
+      substack: "#cf6735",
+      x: "#393943",
+      vimeo: "#297e9f",
+      media: "#457c9c",
+    }[ref.kind] || "#7354b1";
+  const hasVideo =
+    ref.kind === "youtube" ||
+    ref.kind === "vimeo" ||
+    Boolean(ref.media?.some((m) => m.type === "video"));
   c.fillStyle = "#fff";
   c.strokeStyle = "#cfcad8";
   c.lineWidth = 2;
@@ -101,7 +117,13 @@ export async function linkCard(raw) {
   c.textAlign = "center";
   c.font = "bold 14px Arial";
   c.fillText(
-    { youtube: "▶", substack: "≡", x: "𝕏", vimeo: "v" }[ref.kind] || "↗",
+    {
+      youtube: "▶",
+      substack: "≡",
+      x: "𝕏",
+      vimeo: "v",
+      media: hasVideo ? "▶" : "▣",
+    }[ref.kind] || "↗",
     28.5,
     28,
   );
@@ -125,6 +147,21 @@ export async function linkCard(raw) {
       imgHeight,
     );
     image.close();
+    if (hasVideo) {
+      const cx = width / 2,
+        cy = header + imgHeight / 2;
+      c.fillStyle = "rgba(20, 17, 28, 0.72)";
+      c.beginPath();
+      c.arc(cx, cy, 24, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = "#fff";
+      c.beginPath();
+      c.moveTo(cx - 7, cy - 10);
+      c.lineTo(cx + 11, cy);
+      c.lineTo(cx - 7, cy + 10);
+      c.closePath();
+      c.fill();
+    }
   }
   let y = header + imgHeight + 20;
   c.textBaseline = "top";

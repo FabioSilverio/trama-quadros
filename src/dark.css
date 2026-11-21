@@ -174,6 +174,59 @@
   --color-primary: #c4aaff;
   --color-primary-light: #43375b;
 }
+[data-theme="dark"] .auth-page {
+  background-color: #19181e;
+  background-image: radial-gradient(#383344 1px, transparent 1px);
+}
+[data-theme="dark"] .auth-card {
+  background: #23202a;
+  border-color: var(--line);
+  box-shadow: 0 18px 50px #08060d66;
+}
+[data-theme="dark"] .auth-head p {
+  color: #c3bdcc;
+}
+[data-theme="dark"] .auth-tabs {
+  background: #1b1922;
+  border-color: var(--line);
+}
+[data-theme="dark"] .auth-tabs button {
+  color: #bbb4c8;
+}
+[data-theme="dark"] .auth-tabs button.active {
+  background: #342c44;
+  color: #e6dbff;
+}
+[data-theme="dark"] .auth-notice {
+  background: #2e2541;
+  border-color: #554476;
+  color: #dfd0ff;
+}
+[data-theme="dark"] .auth-input {
+  background: #1b1922;
+  border-color: #51495d;
+  color: #b4acc2;
+}
+[data-theme="dark"] .auth-input input {
+  color: #f2eff9;
+}
+[data-theme="dark"] .auth-input input::placeholder {
+  color: #9e96ad;
+}
+[data-theme="dark"] .auth-error {
+  color: #ffadae;
+}
+[data-theme="dark"] :is(.media-pages, .media-fallback) {
+  background: #24212c;
+  border-color: #51485e;
+  color: #d2cadf;
+}
+[data-theme="dark"] .media-pages button {
+  color: #decdfa;
+}
+[data-theme="dark"] .media-pages button:hover:not(:disabled) {
+  background: #36313e;
+}
 @media (max-width: 640px) {
   .editor-top .theme-picker {
     padding: 0;

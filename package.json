@@ -4,6 +4,7 @@
   "description": "Ateliê visual de quadros e referências",
   "scripts": {
     "test": "playwright test",
+    "test:cloud": "playwright test -c playwright.cloud.config.js",
     "dev": "vite",
     "build": "node scripts/fonts.js && vite build",
     "predev": "node scripts/fonts.js"
@@ -17,6 +18,7 @@
     "idb": "^8.0.4",
     "ipaddr.js": "^2.5.0",
     "lucide-react": "^1.77.0",
+    "pg": "^8.23.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

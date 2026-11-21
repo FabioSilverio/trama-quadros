@@ -22,12 +22,19 @@ import {
   MessageSquareText,
   X,
 } from "lucide-react";
-import { getScene, saveScene, getSetting, setSetting } from "./storage.js";
+import {
+  getScene,
+  saveScene,
+  getSetting,
+  setSetting,
+  isCloudMode,
+} from "./storage.js";
 import { sceneSpecs } from "./art.jsx";
 import { Dialog } from "./ui.jsx";
 import { ThemePicker } from "./theme.jsx";
 import { parseLink } from "./links.js";
 import { linkCard, lettering, textDefaults, readData } from "./media.js";
+import PostMedia from "./XMedia.jsx";
 import "./editor.css";
 import { journalScene, recoverJournal, forgetJournal } from "./recovery.js";
 
@@ -56,11 +63,19 @@ const sceneState = (a) =>
       .filter((k) => a[k] !== undefined)
       .map((k) => [k, a[k]]),
   );
-export default function Editor({ board, project, leave, appearance }) {
+export default function Editor({
+  board,
+  project,
+  leave,
+  appearance,
+  onUnauthorized,
+}) {
   const [initial, init] = useState(null),
+    [canvasKey, setCanvasKey] = useState(0),
     [api, setApi] = useState(null),
     [problem, fail] = useState(""),
     [status, setStatus] = useState("Salvo"),
+    [conflict, setConflict] = useState(false),
     [selected, select] = useState(null),
     [modal, dialog] = useState(null),
     [busy, setBusy] = useState(0),
@@ -88,6 +103,47 @@ export default function Editor({ board, project, leave, appearance }) {
   function notify(message) {
     apiRef.current?.setToast({ message, duration: 4200, closable: true });
   }
+  async function reloadFromServer() {
+    clearTimeout(timer.current);
+    timer.current = null;
+    forgetJournal(board.id);
+    setStatus("Carregando…");
+    try {
+      const [committed, library] = await Promise.all([
+        getScene(board.id),
+        getSetting("library"),
+      ]);
+      if (!alive.current) return;
+      revision.current = committed?.revision || 0;
+      written.current = committed;
+      latest.current = committed;
+      lastError.current = null;
+      base.current = null;
+      setConflict(false);
+      setStatus("Salvo");
+      select(null);
+      closeLive();
+      init(
+        committed
+          ? { ...committed, libraryItems: library || [] }
+          : {
+              elements: convert(sceneSpecs(board.cover)),
+              appState: { viewBackgroundColor: "#ffffff" },
+              scrollToContent: true,
+              libraryItems: library || [],
+            },
+      );
+      setCanvasKey((n) => n + 1);
+    } catch (err) {
+      if (!alive.current) return;
+      if (err?.code === "UNAUTHORIZED") {
+        onUnauthorized?.();
+        return;
+      }
+      setStatus("Erro ao salvar");
+      notify(err?.message || "Não foi possível recarregar o quadro.");
+    }
+  }
   function save(cover) {
     clearTimeout(timer.current);
     timer.current = null;
@@ -101,17 +157,22 @@ export default function Editor({ board, project, leave, appearance }) {
         revision.current = savedRevision;
         lastError.current = null;
         written.current = snap;
-        if (alive.current && latest.current === snap) setStatus("Salvo");
+        if (alive.current && latest.current === snap) {
+          setConflict(false);
+          setStatus("Salvo");
+        }
       })
       .catch((err) => {
         lastError.current = err;
         if (alive.current) {
-          setStatus("Erro ao salvar");
+          setConflict(err.code === "CONFLICT");
+          setStatus(err.code === "CONFLICT" ? "Conflito" : "Erro ao salvar");
           notify(
             err.name === "QuotaExceededError"
               ? "Armazenamento cheio. Exporte uma cópia pelo menu do editor."
               : err.message || "Falha ao salvar o quadro.",
           );
+          if (err.code === "UNAUTHORIZED") onUnauthorized?.();
         }
         throw err;
       });
@@ -181,7 +242,15 @@ export default function Editor({ board, project, leave, appearance }) {
           },
         )
       : load();
-    lock.catch(() => fail("Não foi possível abrir o quadro neste navegador."));
+    lock.catch((err) => {
+      if (err?.code === "UNAUTHORIZED") {
+        onUnauthorized?.();
+        return;
+      }
+      fail(
+        err?.message || "Não foi possível abrir o quadro neste navegador.",
+      );
+    });
     const hide = () => {
       if (document.visibilityState === "hidden") save().catch(() => {});
     };
@@ -216,7 +285,7 @@ export default function Editor({ board, project, leave, appearance }) {
     return () => {
       alive.current = false;
       clearTimeout(timer.current);
-      save().catch(() => {});
+      if (lastError.current?.code !== "CONFLICT") save().catch(() => {});
       release();
       document.removeEventListener("visibilitychange", hide);
       window.removeEventListener("pagehide", unload);
@@ -382,24 +451,36 @@ export default function Editor({ board, project, leave, appearance }) {
     if (!previous) return;
     setStatus("Salvando…");
     if (!timer.current)
-      timer.current = setTimeout(() => save().catch(() => {}), 250);
+      timer.current = setTimeout(
+        () => save().catch(() => {}),
+        isCloudMode() ? 800 : 250,
+      );
   }
   function openLive(el) {
     const ref = parseLink(el.customData.reference.url);
     if (!ref) return;
     liveId.current = el.id;
-    showLive({ ...el.customData.reference, frame: ref.frame, url: ref.url });
+    showLive({
+      ...ref,
+      ...el.customData.reference,
+      kind: ref.kind,
+      frame: ref.frame,
+      url: ref.url,
+      media: el.customData.reference.media?.length
+        ? el.customData.reference.media
+        : ref.media,
+    });
     livePosition(el, api.getAppState());
   }
   function livePosition(e, state) {
     const xy = sceneCoordsToViewportCoords({ sceneX: e.x, sceneY: e.y }, state);
     const r = host.current.getBoundingClientRect();
     const w = Math.min(
-        Math.max(e.width * state.zoom.value, 285),
+        Math.max(e.width * state.zoom.value, 320),
         Math.max(200, r.width - 20),
       ),
       h = Math.min(
-        Math.max(e.height * state.zoom.value, 265),
+        Math.max(e.height * state.zoom.value, 285),
         Math.max(170, r.height - 24),
       );
     const rect = {
@@ -622,12 +703,18 @@ export default function Editor({ board, project, leave, appearance }) {
           <Check size={14} />
           {busy ? "Carregando referência…" : status}
         </span>
-        {status === "Erro ao salvar" && (
+        {(status === "Erro ao salvar" || conflict) && (
           <button
             className="secondary retry-save"
-            onClick={() => save().catch(() => {})}
+            onClick={() => {
+              if (conflict) {
+                reloadFromServer();
+              } else {
+                save().catch(() => {});
+              }
+            }}
           >
-            Tentar salvar
+            {conflict ? "Recarregar versão" : "Tentar salvar"}
           </button>
         )}
         <div className="editor-buttons">
@@ -677,6 +764,7 @@ export default function Editor({ board, project, leave, appearance }) {
       >
         {initial && (
           <Excalidraw
+            key={canvasKey}
             excalidrawAPI={setApi}
             initialData={initial}
             theme={appearance.theme}
@@ -757,14 +845,16 @@ export default function Editor({ board, project, leave, appearance }) {
                 <X size={17} />
               </button>
             </header>
-            {live.frame ? (
+            {live.kind === "x" || live.kind === "media" || live.media?.length ? (
+              <PostMedia
+                key={liveId.current || live.url}
+                reference={live}
+                theme={appearance.theme}
+              />
+            ) : live.frame ? (
               <iframe
                 title={live.title}
-                src={
-                  live.kind === "x"
-                    ? live.frame + "&theme=" + appearance.theme
-                    : live.frame
-                }
+                src={live.frame}
                 allow="fullscreen; encrypted-media; picture-in-picture"
                 allowFullScreen
                 referrerPolicy="strict-origin-when-cross-origin"

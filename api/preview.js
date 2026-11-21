@@ -1,3 +1,4 @@
+import {xPreview} from "../server/x-media.js";
 import { pagePreview } from "../server/page-preview.js";
 import { parseLink } from "../src/links.js";
 function plain(html) {
@@ -16,6 +17,7 @@ export default async function handler(req, res) {
   const ref = parseLink(req.query.url);
   if (!ref || req.method !== "GET")
     return res.status(400).json({ error: "Link inválido" });
+  const extra=ref.kind==="x"?xPreview(ref,req.query.linked).catch(()=>null):null;
   let endpoint;
   if (ref.kind === "youtube")
     endpoint =
@@ -73,11 +75,14 @@ export default async function handler(req, res) {
     "Cache-Control",
     "public, s-maxage=21600, stale-while-revalidate=86400",
   );
-  res.status(200).json(
-    Object.fromEntries(
+  const rich=await extra;
+  if(rich)for(const k of ["title","author","image"])if(rich[k])info[k]=rich[k];
+  res.status(200).json({
+    ...(rich?.media?.length?{media:rich.media}:{}),
+    ...Object.fromEntries(
       Object.entries(info)
         .filter(([, v]) => typeof v === "string" && v)
         .map(([k, v]) => [k, v.slice(0, 1800)]),
     ),
-  );
+  });
 }

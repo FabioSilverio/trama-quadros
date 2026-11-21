@@ -23,6 +23,8 @@ import {
   X,
   Check,
   Menu,
+  LogOut,
+  RefreshCw,
 } from "lucide-react";
 import "@fontsource-variable/dm-sans/wght.css";
 import "./style.css";
@@ -36,7 +38,13 @@ import {
   deleteBoard,
   copyBoard,
   palette,
+  setCloudMode,
+  inspectLocalWorkspace,
+  migrateLocalToCloud,
+  clearLocalCache,
 } from "./storage.js";
+import { getSession, logoutAccount } from "./cloud.js";
+import Auth from "./Auth.jsx";
 import { Art, coverColors } from "./art.jsx";
 import { Dialog, Brand } from "./ui.jsx";
 import { parseLink } from "./links.js";
@@ -49,6 +57,13 @@ function App() {
   const [projects, setProjects] = useState([]),
     [boards, setBoards] = useState([]),
     [ready, setReady] = useState(false),
+    [auth, setAuth] = useState({
+      checked: false,
+      cloudEnabled: false,
+      user: null,
+      localBoardsCount: 0,
+    }),
+    [syncing, setSyncing] = useState(false),
     [error, setError] = useState(""),
     [open, setOpen] = useState(boardHash),
     [filter, filterBy] = useState("all"),
@@ -60,26 +75,110 @@ function App() {
     [mobile, drawer] = useState(false),
     [menu, actions] = useState("");
   const find = useRef(null);
+  const authRef = useRef(auth);
+  authRef.current = auth;
   useEffect(() => setLimit(24), [filter, query, sort]);
+  function handleUnauthorized() {
+    location.hash = "";
+    setOpen("");
+    setProjects([]);
+    setBoards([]);
+    setAuth((s) => ({ ...s, user: null }));
+  }
   async function refresh() {
-    const [p, b] = await list();
-    setProjects(p);
-    setBoards(b);
+    setSyncing(true);
+    try {
+      const [p, b] = await list();
+      setProjects(p);
+      setBoards(b);
+    } catch (err) {
+      if (err?.code === "UNAUTHORIZED") {
+        handleUnauthorized();
+        return;
+      }
+      throw err;
+    } finally {
+      setSyncing(false);
+    }
+  }
+  async function handleAuthSuccess(user, isNewAccount) {
+    setCloudMode(true);
+    await migrateLocalToCloud(user.id, isNewAccount);
+    setAuth((s) => ({ ...s, user, localBoardsCount: 0 }));
+    await refresh();
+  }
+  async function handleLogout() {
+    drawer(false);
+    await logoutAccount().catch(() => {});
+    await clearLocalCache();
+    location.hash = "";
+    setOpen("");
+    setProjects([]);
+    setBoards([]);
+    setFilterSafe();
+    setAuth((s) => ({ ...s, user: null, localBoardsCount: 0 }));
+  }
+  function setFilterSafe() {
+    filterBy("all");
+    search("");
+    actions("");
   }
   useEffect(() => {
-    initialize()
-      .then(refresh)
-      .then(() => setReady(true))
-      .catch(() =>
-        setError("Não foi possível abrir o armazenamento deste navegador."),
-      );
+    let active = true;
+    async function boot() {
+      const session = await getSession();
+      if (!active) return;
+      if (session.cloudEnabled) {
+        setCloudMode(true);
+        if (!session.user) {
+          const local = await inspectLocalWorkspace();
+          if (!active) return;
+          setAuth({
+            checked: true,
+            cloudEnabled: true,
+            user: null,
+            localBoardsCount: local.hasCustomData ? local.boardCount : 0,
+          });
+          setReady(true);
+          return;
+        }
+        setAuth({
+          checked: true,
+          cloudEnabled: true,
+          user: session.user,
+          localBoardsCount: 0,
+        });
+        await migrateLocalToCloud(session.user.id, false).catch(() => {});
+        await refresh();
+        if (active) setReady(true);
+        return;
+      }
+      setCloudMode(false);
+      setAuth({
+        checked: true,
+        cloudEnabled: false,
+        user: null,
+        localBoardsCount: 0,
+      });
+      await initialize();
+      await refresh();
+      if (active) setReady(true);
+    }
+    boot().catch(() => {
+      if (active)
+        setError("Não foi possível abrir sua área de trabalho.");
+    });
     const change = () => {
       setOpen(boardHash());
-      refresh().catch(() => setError("Falha ao ler os quadros."));
+      const state = authRef.current;
+      if (state.checked && (!state.cloudEnabled || state.user)) {
+        refresh().catch(() => setError("Falha ao ler os quadros."));
+      }
     };
     window.addEventListener("hashchange", change);
     window.addEventListener("focus", change);
     return () => {
+      active = false;
       window.removeEventListener("hashchange", change);
       window.removeEventListener("focus", change);
     };
@@ -228,6 +327,14 @@ function App() {
         Abrindo sua área de trabalho…
       </div>
     );
+  if (auth.cloudEnabled && !auth.user)
+    return (
+      <Auth
+        appearance={appearance}
+        localBoardsCount={auth.localBoardsCount}
+        onSuccess={handleAuthSuccess}
+      />
+    );
   if (selected)
     return (
       <Suspense
@@ -243,9 +350,10 @@ function App() {
           board={selected}
           appearance={appearance}
           project={projects.find((p) => p.id === selected.project)}
+          onUnauthorized={handleUnauthorized}
           leave={() => {
             location.hash = "";
-            refresh();
+            refresh().catch(() => {});
           }}
         />
       </Suspense>
@@ -317,15 +425,55 @@ function App() {
             </button>
           ))}
         </div>
-        <div className="side-foot">
-          <div className="profile">
-            <Layers3 size={21} />
+        {auth.cloudEnabled && auth.user ? (
+          <div className="side-foot">
+            <div className="profile" aria-hidden="true">
+              {(auth.user.name || auth.user.email || "U")[0].toUpperCase()}
+            </div>
+            <div className="side-user">
+              <b title={auth.user.email}>
+                {auth.user.name || auth.user.email}
+              </b>
+              <small>{syncing ? "Sincronizando…" : "Sincronizado"}</small>
+            </div>
+            <div className="side-foot-actions">
+              <button
+                className="icon"
+                title="Sincronizar agora"
+                aria-label="Sincronizar agora"
+                disabled={syncing}
+                onClick={() =>
+                  refresh().catch(() =>
+                    dialog({
+                      type: "message",
+                      message: "Não foi possível sincronizar agora.",
+                    }),
+                  )
+                }
+              >
+                <RefreshCw size={15} className={syncing ? "spin" : ""} />
+              </button>
+              <button
+                className="icon"
+                title="Sair"
+                aria-label="Sair"
+                onClick={handleLogout}
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
           </div>
-          <div>
-            <b>Espaço pessoal</b>
-            <small>Neste navegador</small>
+        ) : (
+          <div className="side-foot">
+            <div className="profile">
+              <Layers3 size={21} />
+            </div>
+            <div>
+              <b>Espaço pessoal</b>
+              <small>Neste navegador</small>
+            </div>
           </div>
-        </div>
+        )}
       </aside>
       <div className="main">
         <header className="topbar">
@@ -645,16 +793,18 @@ function App() {
                 insira texto com fontes próprias.
               </p>
               <p>
-                Seus quadros ficam neste navegador. Use o menu do editor para
-                exportar uma cópia em .excalidraw e abrir em outro dispositivo.
+                {auth.cloudEnabled
+                  ? "Seus projetos e quadros ficam sincronizados na sua conta entre todos os seus dispositivos. Você também pode exportar cópias em .excalidraw pelo menu do editor."
+                  : "Seus quadros ficam neste navegador. Use o menu do editor para exportar uma cópia em .excalidraw e abrir em outro dispositivo."}
               </p>
             </div>
           ) : (
             <form onSubmit={submit}>
               {modal.type === "delete" ? (
                 <p>
-                  Excluir “{modal.name}” deste navegador? Essa ação é
-                  permanente.
+                  Excluir “{modal.name}”
+                  {auth.cloudEnabled ? " da sua conta" : " deste navegador"}?
+                  Essa ação é permanente.
                 </p>
               ) : (
                 <>

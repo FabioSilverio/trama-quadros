@@ -57,6 +57,10 @@ export function parseLink(input) {
       id: parts.at(-1),
       frame: "https://player.vimeo.com/video/" + parts.at(-1),
     };
+  if(u.protocol==='https:'){
+    const photo=/\.(avif|gif|jpe?g|png|webp)$/i.test(u.pathname);
+    if(photo||/\.(mp4|webm|m4v|mov)$/i.test(u.pathname))return {...common,kind:'media',media:[{type:photo?'photo':'video',url:u.href,poster:photo?u.href:undefined}],image:photo?u.href:undefined};
+  }
   return common;
 }
 function decodeTitle(slug) {
